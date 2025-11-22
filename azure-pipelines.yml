@@ -1,0 +1,57 @@
+# Run this pipeline whenever code is pushed to main
+trigger:
+  branches:
+    include:
+      - main
+
+# Use a Microsoft-hosted Ubuntu VM (Docker preinstalled)
+pool:
+  vmImage: 'ubuntu-latest'
+
+# Image naming
+variables:
+  imageName: 'insecure-demo-app'
+  imageTag: '$(Build.BuildId)'
+  fullImage: '$(imageName):$(imageTag)'
+
+steps:
+  # Checkout the repo (Dockerfile + app code)
+  - checkout: self
+
+  # Make sure Docker is available on the hosted agent
+  - task: DockerInstaller@0
+    displayName: 'Install Docker'
+    inputs:
+      dockerVersion: 'latest'
+
+  # Build the container image from the Dockerfile
+  - script: |
+      docker build -t $(fullImage) .
+    displayName: 'Build image'
+
+  # Install Trivy for image scanning
+  - script: |
+      sudo apt-get update -y
+      sudo apt-get install -y wget
+      wget https://github.com/aquasecurity/trivy/releases/latest/download/trivy_Linux-64bit.tar.gz
+      tar zxvf trivy_Linux-64bit.tar.gz
+      sudo mv trivy /usr/local/bin/
+    displayName: 'Install Trivy'
+
+  # Scan the image and fail the pipeline if HIGH/CRITICAL issues exist
+  - script: |
+      trivy image \
+        --severity HIGH,CRITICAL \
+        --vuln-type os,library \
+        --ignore-unfixed \
+        --exit-code 1 \
+        $(fullImage)
+    displayName: 'Scan image'
+
+  # Optional: only runs if the image passed the scan
+  - script: |
+      docker run --rm -d --name test-container -p 8080:80 $(fullImage)
+      sleep 5
+      docker stop test-container
+    displayName: 'Smoke test'
+    condition: succeeded()
