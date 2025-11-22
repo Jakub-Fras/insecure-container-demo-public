@@ -12,12 +12,12 @@ RUN apt-get update && \
     apt-get install -y curl vim && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy vulnerable Python dependencies
-COPY app/requirements.txt .
+# Copy vulnerable Python dependencies from repo root
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the vulnerable app
-COPY app/ .
+# Copy the vulnerable app (everything in the repo)
+COPY . .
 
 # App listens on port 8080
 EXPOSE 8080
