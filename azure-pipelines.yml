@@ -14,19 +14,16 @@ variables:
 steps:
   - checkout: self
 
-  # Install Docker + wget on the managed agent
   - script: |
       sudo apt-get update -y
       sudo apt-get install -y docker.io wget
       docker --version
     displayName: 'Install Docker and tools'
 
-  # Build the container image
   - script: |
       sudo docker build -t $(fullImage) .
     displayName: 'Build image'
 
-  # Install Trivy via APT and scan the image  <<<<<< FIXED STEP
   - script: |
       sudo apt-get update -y
       sudo apt-get install -y wget apt-transport-https gnupg lsb-release
@@ -47,7 +44,6 @@ steps:
         $(fullImage)
     displayName: 'Scan image'
 
-  # Only runs if scan passed
   - script: |
       sudo docker run --rm -d --name test-container -p 8080:80 $(fullImage)
       sleep 5
