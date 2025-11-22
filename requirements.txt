@@ -1,0 +1,3 @@
+Flask==2.3.2
+PyYAML==5.3.1      # older, has known CVEs
+requests==2.19.1   # older, likely to be flagged
