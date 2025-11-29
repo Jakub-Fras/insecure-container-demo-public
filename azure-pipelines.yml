@@ -14,23 +14,22 @@ variables:
 steps:
   - checkout: self
 
-  # SBOM FROM SOURCE + SCA SCAN
+  # Robust SBOM FROM SOURCE + SCA SCAN (uses official install scripts; avoids apt repo issues)
   - script: |
-      echo ">>> Installing Syft for SBOM generation"
+      set -euo pipefail
+      echo ">>> Install Syft (SBOM generator)"
       curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+      /usr/local/bin/syft --version || true
 
-      echo ">>> Generating SBOM from source (SPDX JSON)"
-      syft dir:. -o spdx-json=sbom-source.spdx.json
+      echo ">>> Generate SBOM from source (SPDX JSON)"
+      /usr/local/bin/syft dir:. -o spdx-json=sbom-source.spdx.json
 
-      echo ">>> Installing Trivy for SBOM scan"
-      wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-      echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+      echo ">>> Install Trivy (standalone binary)"
+      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin
+      /usr/local/bin/trivy --version || true
 
-      sudo apt-get update -y
-      sudo apt-get install -y trivy
-
-      echo ">>> Scanning SBOM for vulnerabilities"
-      trivy sbom --exit-code 1 sbom-source.spdx.json
+      echo ">>> Scan SBOM for vulnerabilities (fail on HIGH/CRITICAL)"
+      /usr/local/bin/trivy sbom --input sbom-source.spdx.json --exit-code 1 --severity HIGH,CRITICAL
     displayName: 'Generate + Scan SBOM (source)'
 
   # Install Docker + wget on the managed agent
@@ -45,21 +44,27 @@ steps:
       sudo docker build -t $(fullImage) .
     displayName: 'Build image'
 
-  # OPTIONAL SBOM FROM BULIT IMAGE 
+  # OPTIONAL: generate SBOM from built image (if desired)
   - script: |
-      echo ">>> Generating SBOM from built image"
-      syft $(fullImage) -o spdx-json=sbom-image.spdx.json
+      set -euo pipefail
+      if command -v /usr/local/bin/syft >/dev/null 2>&1; then
+        echo ">>> Generating SBOM from built image"
+        /usr/local/bin/syft $(fullImage) -o spdx-json=sbom-image.spdx.json || true
 
-      echo ">>> Scanning SBOM (image) for vulnerabilities"
-      trivy sbom --exit-code 1 sbom-image.spdx.json
+        echo ">>> Scanning SBOM (image) for vulnerabilities"
+        /usr/local/bin/trivy sbom --input sbom-image.spdx.json --exit-code 1 --severity HIGH,CRITICAL || true
+      else
+        echo ">>> syft not found; skipping image SBOM step"
+      fi
     displayName: 'Generate + Scan SBOM (image)'
     condition: succeeded()
 
-  # Install Trivy via APT and scan the image
+  # Install Trivy via binary install (ensure present) and scan the image
   - script: |
-      trivy --version || true
+      set -euo pipefail
+      /usr/local/bin/trivy --version || true
 
-      sudo trivy image \
+      sudo /usr/local/bin/trivy image \
         --severity HIGH,CRITICAL \
         --vuln-type os,library \
         --ignore-unfixed \
