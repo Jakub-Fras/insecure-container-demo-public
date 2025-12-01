@@ -7,12 +7,19 @@ pool:
   name: 'managed-pool-agents'
 
 variables:
-  imageName: 'intentionally-vulnerable-demo-image'
-  imageTag: '$(Build.BuildId)'
-  fullImage: '$(imageName):$(imageTag)'
+- group: defender-cli-secrets   # 🔹 brings in DEFENDER_* as secrets
 
-  dockerfilePath: 'Dockerfile'
-  dockerfileFolder: '.'
+- name: imageName
+  value: 'intentionally-vulnerable-demo-image'
+- name: imageTag
+  value: '$(Build.BuildId)'
+- name: fullImage
+  value: '$(imageName):$(imageTag)'
+
+- name: dockerfilePath
+  value: 'Dockerfile'
+- name: dockerfileFolder
+  value: '.'
 
 steps:
 - checkout: self
@@ -36,7 +43,7 @@ steps:
     curl -L -o defender "https://aka.ms/defender-cli_linux-x64"
     chmod +x defender
     ./defender --version
-  displayName: 'Install Defender CLI (optional)'
+  displayName: 'Install Defender CLI'
 
 - script: |
     echo "==== Building Docker Image ===="
@@ -50,11 +57,31 @@ steps:
     sudo docker images
   displayName: 'Build Docker Image'
 
-# 🔹 Connector-based scan – no secrets needed
-- task: MicrosoftDefenderCLI@2
-  displayName: 'Scan Docker Image with Defender for Cloud CLI'
-  inputs:
-    command: 'run'
-    scanType: 'image'
-    imageName: '$(fullImage)'
-    break: true   # or false if you don't want to fail the build
+# ✅ MDVM Scan – token-based, secrets come from variable group
+- script: |
+    echo "==== Running Defender for Cloud MDVM Scan ===="
+
+    # Check env vars (note: correct Bash syntax now)
+    if [ -z "$DEFENDER_TENANT_ID" ] || [ -z "$DEFENDER_CLIENT_ID" ] || [ -z "$DEFENDER_CLIENT_SECRET" ]; then
+      echo "One or more DEFENDER_* variables are missing."
+      exit 1
+    fi
+
+    echo "Starting image scan with Defender CLI..."
+    sudo -E ./defender scan image "$(fullImage)" \
+      --defender-output "$(Build.SourcesDirectory)/defender-results.sarif"
+    EXIT_CODE=$?
+
+    echo "Defender CLI exit code: $EXIT_CODE"
+
+    if [ "$EXIT_CODE" -ne 0 ]; then
+      echo "MDVM scan failed with exit code $EXIT_CODE"
+      exit $EXIT_CODE
+    fi
+
+    echo "MDVM scan completed successfully."
+  displayName: 'Scan Docker Image with Defender CLI (MDVM)'
+  env:
+    DEFENDER_TENANT_ID: $(DEFENDER_TENANT_ID)
+    DEFENDER_CLIENT_ID: $(DEFENDER_CLIENT_ID)
+    DEFENDER_CLIENT_SECRET: $(DEFENDER_CLIENT_SECRET)
