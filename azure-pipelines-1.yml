@@ -7,23 +7,17 @@ pool:
   name: 'managed-pool-agents'
 
 variables:
-- group: defender-cli-secrets   # 🔹 brings in DEFENDER_* as secrets
+  imageName: 'intentionally-vulnerable-demo-image'
+  imageTag: '$(Build.BuildId)'
+  fullImage: '$(imageName):$(imageTag)'
 
-- name: imageName
-  value: 'intentionally-vulnerable-demo-image'
-- name: imageTag
-  value: '$(Build.BuildId)'
-- name: fullImage
-  value: '$(imageName):$(imageTag)'
-
-- name: dockerfilePath
-  value: 'Dockerfile'
-- name: dockerfileFolder
-  value: '.'
+  dockerfilePath: 'Dockerfile'
+  dockerfileFolder: '.'
 
 steps:
 - checkout: self
 
+# Install dependencies
 - script: |
     echo "==== Installing Tools ===="
     sudo apt-get update -y
@@ -38,6 +32,7 @@ steps:
     docker --version || sudo docker --version
   displayName: 'Install Docker, RPM, and Start Docker Daemon'
 
+# Download Defender CLI
 - script: |
     echo "==== Downloading Defender for Cloud CLI ===="
     curl -L -o defender "https://aka.ms/defender-cli_linux-x64"
@@ -45,6 +40,7 @@ steps:
     ./defender --version
   displayName: 'Install Defender CLI'
 
+# Build Docker image
 - script: |
     echo "==== Building Docker Image ===="
     echo "Current directory: $(pwd)"
@@ -57,21 +53,21 @@ steps:
     sudo docker images
   displayName: 'Build Docker Image'
 
-# ✅ MDVM Scan – token-based, secrets come from variable group
+# MDVM Scan – Connector-based authentication
 - script: |
-    echo "==== Running Defender for Cloud MDVM Scan ===="
+    echo "==== Running Defender for Cloud MDVM Scan (ADO Connector Auth) ===="
 
-    # Check env vars (note: correct Bash syntax now)
-    if [ -z "$DEFENDER_TENANT_ID" ] || [ -z "$DEFENDER_CLIENT_ID" ] || [ -z "$DEFENDER_CLIENT_SECRET" ]; then
-      echo "One or more DEFENDER_* variables are missing."
+    echo "Checking System.AccessToken..."
+    if [ -z "$SYSTEM_ACCESSTOKEN" ]; then
+      echo "ERROR: SYSTEM_ACCESSTOKEN is empty. Connector auth cannot work."
       exit 1
     fi
+    echo "SYSTEM_ACCESSTOKEN is present."
 
-    echo "Starting image scan with Defender CLI..."
-    sudo -E ./defender scan image "$(fullImage)" \
-      --defender-output "$(Build.SourcesDirectory)/defender-results.sarif"
+    echo "Starting image scan with Defender CLI using connector authentication..."
+    sudo -E ./defender scan image "$(fullImage)"
+
     EXIT_CODE=$?
-
     echo "Defender CLI exit code: $EXIT_CODE"
 
     if [ "$EXIT_CODE" -ne 0 ]; then
@@ -80,8 +76,6 @@ steps:
     fi
 
     echo "MDVM scan completed successfully."
-  displayName: 'Scan Docker Image with Defender CLI (MDVM)'
+  displayName: 'Scan Docker Image with Defender CLI (MDVM - Connector Auth)'
   env:
-    DEFENDER_TENANT_ID: $(DEFENDER_TENANT_ID)
-    DEFENDER_CLIENT_ID: $(DEFENDER_CLIENT_ID)
-    DEFENDER_CLIENT_SECRET: $(DEFENDER_CLIENT_SECRET)
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
